@@ -18,7 +18,7 @@ import 'package:flutter_wallpaper_manager/flutter_wallpaper_manager.dart';
 import 'package:flutter_cache_manager/flutter_cache_manager.dart';
 import 'package:daily_wallpaper/adConfigs.dart';
 
-//删除了一些无用的icon package
+//version: 1.0.60
 
 void main() {
   runApp(const MyApp());

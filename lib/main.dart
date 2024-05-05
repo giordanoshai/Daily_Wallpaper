@@ -1,23 +1,24 @@
 import 'dart:convert';
-import 'dart:io';
+// import 'dart:io';
 import 'dart:async';
+import 'dart:math';
 
 // import 'package:flutter/gestures.dart';
-import 'package:flutter/cupertino.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:image_fade/image_fade.dart';
-// import 'package:flutter_gromore_ads/flutter_gromore_ads.dart';
+import 'package:flutter_gromore_ads/flutter_gromore_ads.dart';
 import 'package:http/http.dart' as http;
-// import 'dart:convert';
-//
+
+
 import 'package:permission_handler/permission_handler.dart';
 // import 'package:path_provider/path_provider.dart';
 import 'package:gallery_saver/gallery_saver.dart';
 import 'package:flutter_wallpaper_manager/flutter_wallpaper_manager.dart';
 import 'package:flutter_cache_manager/flutter_cache_manager.dart';
+import 'package:daily_wallpaper/adConfigs.dart';
 
-
+//删除了一些无用的icon package
 
 void main() {
   runApp(const MyApp());
@@ -57,32 +58,44 @@ class MyHomePage extends StatefulWidget {
 
 //////////////////////
 class _MyHomePageState extends State<MyHomePage> {
-
+  ///变量
+  String _platformVersion = 'Unknown';
+  String __heightWidth = "Unknown";
   String copyRight = '';
   String _imageUrl = '';
   final String _bingApi = 'http://box.ggwp.cn:52490/get_random_image_url';
-  String _platformVersion = 'Unknown';
-  String __heightWidth = "Unknown";
   double _initialPosition = 0.0 ; // 初始触摸点位置
   double _lastPosition =  0.0 ; // 上一次触摸点位置
   double _distance = 0.0; // 位置变化的字符串表示
-  final fadeColor = const LinearGradient(
-    colors: [Colors.blue, Colors.transparent],
-    begin: Alignment.topCenter,
-    end: Alignment.bottomCenter,
-  );
+  String _adInitResult = '';
+  String _adEvent = '';
+  String eventAction = '';
+  final Set<String> eventActions = {
+    'onAdComplete',
+    'onAdClosed',
+    'onAdReward',
+    'onAdSkip'
+  };
+  bool _isButtonTrigger = false;
 
 
   @override
   void initState() {
-    super.initState();
-
     _fetchBingImageUrl();
-    initAppState();
-  } ///运行执行_fetchBingImageUrl
+    setAdEvent();
+    initAd();
+    requestIDFA();
+    super.initState();
+    ///开启app后获取_imageUrl
+    initAppState();///初始化wallpaper manager
+  }
+  ///开机执行
+
+///函数
   ///
 
 
+  ///初始化壁纸插件wallpaperManager
   Future<void> initAppState() async {
     String platformVersion;
     String heightWidth;
@@ -136,8 +149,6 @@ class _MyHomePageState extends State<MyHomePage> {
     }
   } ///传递图片地址给_imageUrl
 
-
-
   // Future<void> _fetchBingImageUrl() async {
   //   try {
   //     final String imageUrl = await fetchBingImageUrl();
@@ -174,120 +185,186 @@ class _MyHomePageState extends State<MyHomePage> {
   //     }
   //   }
   //   return imageUrl;
-  // } ///获取302跳转RUL
+  // } //////add获取302跳转RUL
+  ///获取302跳转URL，获取imageUrl过时代码.
+    ///保存图片 旧代码，也管用，但是没权限的时候照样显示，体验不好。
+  // void _downloadImage() async {
+  //   var status = await Permission.mediaLibrary.request();
+  //   bool isButtonTrigger = await showInterstitialAd();
+  //   setState(() {
+  //     isButtonTrigger = _isButtonTrigger;
+  //   });
+  //   if (status.isGranted && isButtonTrigger) {
+  //     GallerySaver.saveImage(_imageUrl, albumName: 'Media').then((success) {
+  //       setState(() {
+  //         _isButtonTrigger = false;
+  //         ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+  //           backgroundColor: Colors.transparent,
+  //           margin: EdgeInsets.only(bottom: 380.0),
+  //           behavior: SnackBarBehavior.floating,
+  //           content: Text(
+  //             '保存成功',
+  //             textAlign: TextAlign.center,
+  //             style: TextStyle(fontSize: 20.0),
+  //           ),
+  //         ));
+  //       });
+  //
+  //     });
+  //   }
+  //   else {}
+  // }
 
-
-
-  void _downloadImage() async {
+  ///保存图片并显示广告，检测广告是否
+  Future<void> _downloadImage() async {
+    // 请求权限
     var status = await Permission.mediaLibrary.request();
-    if (status.isGranted) {
+    bool isAdShown = eventActions.contains(await showInterstitialAd());
+    if (isAdShown && status.isGranted) {// 如果广告未展示，则不继续
       GallerySaver.saveImage(_imageUrl, albumName: 'Media').then((success) {
-        setState(() {
-          ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-            backgroundColor: Colors.transparent,
-            margin: EdgeInsets.only(bottom: 380.0),
-            behavior: SnackBarBehavior.floating,
-            content: Text(
-              '保存成功',
-              textAlign: TextAlign.center,
-              style: TextStyle(fontSize: 20.0),
-            ),
-          ));
+          setState(() {
+            _isButtonTrigger = false;
+            ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+              backgroundColor: Colors.transparent,
+              margin: EdgeInsets.only(bottom: 380.0),
+              behavior: SnackBarBehavior.floating,
+              content: Text(
+                '保存成功',
+                textAlign: TextAlign.center,
+                style: TextStyle(color: Colors.white70,fontSize: 20.0),
+              ),
+            ));
+          });
         });
-
-      });
     }
-    else {}
-  } ///保存图片
+  }
 
 
-  Future<void> setWallpaperHome() async {
-    try {
-      String url = _imageUrl;
-      int location = WallpaperManager
-          .HOME_SCREEN; // or location = WallpaperManager.LOCK_SCREEN;
-      var file = await DefaultCacheManager().getSingleFile(url);
-      // final bool result =
-      await WallpaperManager.setWallpaperFromFile(file.path, location);
-        setState(() {
-          ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-            backgroundColor: Colors.transparent,
-            margin: EdgeInsets.only(bottom: 380.0),
-            behavior: SnackBarBehavior.floating,
-            content: Text(
-              '设置成功',
-              textAlign: TextAlign.center,
-              style: TextStyle(fontSize: 20.0),
-            ),
-          ));
-        });
 
+
+ // Future <void> setWallpaperHome() async {
+ //    try {
+ //      String url = _imageUrl;
+ //      int location = WallpaperManager
+ //          .HOME_SCREEN; // or location = WallpaperManager.LOCK_SCREEN;
+ //      var file = await DefaultCacheManager().getSingleFile(url);
+ //      // final bool result =
+ //      await WallpaperManager.setWallpaperFromFile(file.path, location);
+ //        setState(() {
+ //          ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+ //            backgroundColor: Colors.transparent,
+ //            margin: EdgeInsets.only(bottom: 380.0),
+ //            behavior: SnackBarBehavior.floating,
+ //            content: Text(
+ //              '设置成功1',
+ //              textAlign: TextAlign.center,
+ //              style: TextStyle(fontSize: 20.0),
+ //            ),
+ //          ));
+ //        });
+ //
+ //    }
+ //    catch(e){
+ //      // ignored, really.
+ //    }
+ //  }///设置HOME
+  //
+  // Future<void> setWallpaperLock() async {
+  //   try {
+  //     String url = _imageUrl;
+  //     int location = WallpaperManager
+  //         .LOCK_SCREEN; // or location = WallpaperManager.LOCK_SCREEN;
+  //     var file = await DefaultCacheManager().getSingleFile(url);
+  //     // final bool result =
+  //     await WallpaperManager.setWallpaperFromFile(file.path, location);
+  //
+  //       setState(() {
+  //         ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+  //           backgroundColor: Colors.transparent,
+  //           margin: EdgeInsets.only(bottom: 380.0),
+  //           behavior: SnackBarBehavior.floating,
+  //           content: Text(
+  //             '设置成功',
+  //             textAlign: TextAlign.center,
+  //             style: TextStyle(fontSize: 20.0),
+  //           ),
+  //         ));
+  //       });
+  //
+  //   }
+  //   catch(e){
+  //     // ignored, really.
+  //   }
+  // }///设置LOCK
+  //
+  //
+  // Future<void> setWallpaperBoth() async {
+  //   try {
+  //     String url = _imageUrl;
+  //     int location = WallpaperManager
+  //         .BOTH_SCREEN; // or location = WallpaperManager.LOCK_SCREEN;
+  //     var file = await DefaultCacheManager().getSingleFile(url);
+  //     // final bool result =
+  //     await WallpaperManager.setWallpaperFromFile(file.path, location);
+  //
+  //     setState(() {
+  //       ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+  //         backgroundColor: Colors.transparent,
+  //         margin: EdgeInsets.only(bottom: 380.0),
+  //         behavior: SnackBarBehavior.floating,
+  //         content: Text(
+  //           '设置成功',
+  //           textAlign: TextAlign.center,
+  //           style: TextStyle(fontSize: 20.0),
+  //         ),
+  //       ));
+  //     });
+  //
+  //   }
+  //   catch(e){
+  //     // ignored, really.
+  //   }
+  // }///设置BOTH
+  // ///壁纸旧代码
+
+  ///设置壁纸新代码
+  Future<void> setWallpaper(int location) async {
+    bool isAdShown = eventActions.contains(await showInterstitialAd());
+    if (isAdShown) {
+      try {
+          var file = await DefaultCacheManager().getSingleFile(_imageUrl);
+          await WallpaperManager.setWallpaperFromFile(file.path, location);
+            setState(() {
+              _isButtonTrigger = false;
+              ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+                backgroundColor: Colors.transparent,
+                margin: EdgeInsets.only(bottom: 380.0),
+                behavior: SnackBarBehavior.floating,
+                content: Text(
+                  '设置成功',
+                  textAlign: TextAlign.center,
+                  style: TextStyle(color: Colors.white70,fontSize: 20.0),
+                ),
+              ));
+            });
+
+      } catch (e) {
+        // 向用户显示一个通用错误消息
+      }
     }
-    catch(e){
-      // ignored, really.
-    }
-  }///设置HOME
+  }///设置壁纸
 
-  Future<void> setWallpaperLock() async {
-    try {
-      String url = _imageUrl;
-      int location = WallpaperManager
-          .LOCK_SCREEN; // or location = WallpaperManager.LOCK_SCREEN;
-      var file = await DefaultCacheManager().getSingleFile(url);
-      // final bool result =
-      await WallpaperManager.setWallpaperFromFile(file.path, location);
+  void setWallpaperHome() {
+    setWallpaper(WallpaperManager.HOME_SCREEN);
+  }///壁纸Home
 
-        setState(() {
-          ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-            backgroundColor: Colors.transparent,
-            margin: EdgeInsets.only(bottom: 380.0),
-            behavior: SnackBarBehavior.floating,
-            content: Text(
-              '设置成功',
-              textAlign: TextAlign.center,
-              style: TextStyle(fontSize: 20.0),
-            ),
-          ));
-        });
+  void setWallpaperLock() {
+    setWallpaper(WallpaperManager.LOCK_SCREEN);
+  }///壁纸Lock
 
-    }
-    catch(e){
-      // ignored, really.
-    }
-  }///设置LOCK
-
-
-  Future<void> setWallpaperBoth() async {
-    try {
-      String url = _imageUrl;
-      int location = WallpaperManager
-          .BOTH_SCREEN; // or location = WallpaperManager.LOCK_SCREEN;
-      var file = await DefaultCacheManager().getSingleFile(url);
-      // final bool result =
-      await WallpaperManager.setWallpaperFromFile(file.path, location);
-
-      setState(() {
-        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-          backgroundColor: Colors.transparent,
-          margin: EdgeInsets.only(bottom: 380.0),
-          behavior: SnackBarBehavior.floating,
-          content: Text(
-            '设置成功',
-            textAlign: TextAlign.center,
-            style: TextStyle(fontSize: 20.0),
-          ),
-        ));
-      });
-
-    }
-    catch(e){
-      // ignored, really.
-    }
-  }///设置BOTH
-
-
-
-
+  void setWallpaperBoth() {
+    setWallpaper(WallpaperManager.BOTH_SCREEN);
+  }///壁纸Both
 
   void showPopupMenuButton(Offset position) {
     showMenu(
@@ -300,7 +377,9 @@ class _MyHomePageState extends State<MyHomePage> {
       items: <PopupMenuItem<String>>[
 
         PopupMenuItem<String>(
-            onTap: setWallpaperHome,
+            onTap:() {
+              _isButtonTrigger =true;
+              setWallpaperHome();},
             child:const Row(
               children: [
                 Icon(Icons.home),
@@ -309,7 +388,10 @@ class _MyHomePageState extends State<MyHomePage> {
             )
         ),
         PopupMenuItem<String>(
-            onTap: setWallpaperLock,
+            onTap: () {
+              _isButtonTrigger =true;
+              setWallpaperLock();
+              },
             child:const Row(
               children: [
                 Icon(Icons.lock),
@@ -318,7 +400,10 @@ class _MyHomePageState extends State<MyHomePage> {
             )
         ),
         PopupMenuItem<String>(
-          onTap: setWallpaperBoth,
+          onTap: () {
+            _isButtonTrigger =true;
+            setWallpaperBoth();
+          },
           child:const Row(
             children: [
               Icon(Icons.ad_units_outlined),
@@ -331,13 +416,93 @@ class _MyHomePageState extends State<MyHomePage> {
     );
   }
 
+///广告相关函数
+  ///初始化广告SDK
+  Future<bool> initAd() async{
+      try {
+        bool result = await FlutterGromoreAds.initAd(
+            '5520923',
+            config:'android_config_5520923.json' ,
+            limitPersonalAds: 0,
+        );
+        _adInitResult = "广告SDK 初始化${result? '成功':'失败'}";
+        setState(() {});
+        return result;
+      }on PlatformException catch(e) {
+        _adInitResult =
+        "广告SDK 初始化失败 code:${e.code} msg:${e.message} details:${e.details}";
+      }
+      setState(() {});
+      return false;
+ }
+
+  ///设置广告监听
+ Future<void> setAdEvent() async {
+    setState(() {
+      _adEvent = '设置成功';
+    });
+    FlutterGromoreAds.onEventListener((event) {
+      _adEvent = 'adId:${event.adId} action:${event.action}';
+      if (event is AdErrorEvent) {
+        //错误事件
+        _adEvent += ' errCode:${event.errCode} errMsg:${event.errMsg}';
+      }
+      else if(event is AdRewardEvent) {
+        //激励事件
+        _adEvent += ' rewardVerify:${event.rewardVerify} '
+            'rewardAmount:${event.rewardAmount} rewardName:${event.rewardName} '
+            'errCode:${event.errCode} errMsg:${event.errMsg} '
+            'customData:${event.customData} userId:${event.userId}';
+      }
+      debugPrint('onEventListener:$_adEvent');
+      setState(() {});
+    });
+ }
+
+  /// 请求应用跟踪透明度授权
+  Future<void> requestIDFA() async {
+    bool result = await FlutterGromoreAds.requestIDFA;
+    _adEvent = '请求广告标识符:$result';
+    setState(() {});
+  }
+
+  /// 请求应用跟踪透明度授权
+  Future<void> requestPermissionIfNecessary() async {
+    bool result = await FlutterGromoreAds.requestPermissionIfNecessary;
+    _adEvent = '请求相关权限:$result';
+    setState(() {});
+  }
+
+  ///插屏广告
+  Future<String> showInterstitialAd() async {
+    String adId = await AdConfig.getInterstitialId();
+    try {
+      bool requestPermission =  await FlutterGromoreAds.requestPermissionIfNecessary;
+        if (requestPermission){
+          bool result = await FlutterGromoreAds.showInterstitialAd(adId);
+           if (_isButtonTrigger) {
+            FlutterGromoreAds.onEventListener((event) {
+                eventAction = event.action;
+                // print('TT_EventAction is :$eventAction,and _isButtonTrigger:$_isButtonTrigger');
+            });
+          }else{
+            eventAction = 'TT_EventAction : not_trigger_by_button';
+            // print(eventAction);
+          }
+          _adInitResult = "展示插屏广告${result ? '成功' : '失败'}";
+        }
+    } on PlatformException catch (e) {
+      _adInitResult = "展示插屏广告失败 code:${e.code} msg:${e.message} details:${e.details}";
+    }
+    setState(() {});
+    return eventAction;
+  }
 
 
 
+///广告相关函数
 
-
-
-///////////////////
+///函数
 
   @override
   Widget build(BuildContext context) {
@@ -374,6 +539,10 @@ class _MyHomePageState extends State<MyHomePage> {
                    case -1:
                      if (_distance.abs() >= 40)
                        {
+                         final random = Random().nextDouble();
+                           if (random <= 0.4) {
+                             showInterstitialAd();
+                           }///40%的几率出现广告
                          _fetchBingImageUrl();
                        }
                  }
@@ -434,6 +603,15 @@ class _MyHomePageState extends State<MyHomePage> {
             child: Column(
               mainAxisAlignment: MainAxisAlignment.end,
               children: [
+                // FloatingActionButton(
+                //     onPressed: shareImage,
+                //     backgroundColor: Colors.blue[700],
+                //     mini:true,
+                //     child: const Icon(Icons.share_outlined,color: Colors.white70,)
+                // ),
+                // const SizedBox(
+                //   height: 10,
+                // ),
                 FloatingActionButton(
                   onPressed: _fetchBingImageUrl,
                   backgroundColor: Colors.blue[700],
@@ -445,7 +623,10 @@ class _MyHomePageState extends State<MyHomePage> {
                   height: 10,
                 ),
                 FloatingActionButton(
-                  onPressed: _downloadImage,
+                  onPressed: () {
+                    _isButtonTrigger = true;
+                    _downloadImage();
+                  },
                   backgroundColor: Colors.blue[700],
                   mini:true,
                   child: const Icon(Icons.save,color: Colors.white70,)

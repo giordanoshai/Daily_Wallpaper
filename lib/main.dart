@@ -1,36 +1,28 @@
-import 'dart:convert';
-import 'dart:async';
-import 'package:flutter/cupertino.dart';
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
 import 'package:image_fade/image_fade.dart';
-import 'package:http/http.dart' as http;
-import 'package:permission_handler/permission_handler.dart';
-
-import 'package:gallery_saver/gallery_saver.dart';
+import 'package:gal/gal.dart';
 import 'package:flutter_wallpaper_manager/flutter_wallpaper_manager.dart';
 import 'package:flutter_cache_manager/flutter_cache_manager.dart';
 
-
+import 'bing_wallpaper_service.dart';
 
 void main() {
   runApp(const MyApp());
 }
 
-
-
-
 class MyApp extends StatelessWidget {
   const MyApp({super.key});
-
-
 
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
-      title:'简纸',
+      title: '简纸',
+      debugShowCheckedModeBanner: false,
       theme: ThemeData(
-        colorScheme: ColorScheme.fromSeed(seedColor: Colors.blueAccent),
+        colorScheme: ColorScheme.fromSeed(
+          seedColor: Colors.blueAccent,
+          brightness: Brightness.dark,
+        ),
         useMaterial3: true,
       ),
       home: const MyHomePage(title: '简纸'),
@@ -47,461 +39,474 @@ class MyHomePage extends StatefulWidget {
   State<MyHomePage> createState() => _MyHomePageState();
 }
 
-
-
-//////////////////////
 class _MyHomePageState extends State<MyHomePage> {
+  // 壁纸数据列表与当前索引
+  List<BingWallpaperItem> _wallpapers = [];
+  int _currentIndex = 0;
 
-  String copyRight = '';
-  String _imageUrl = '';
-  final String _bingApi = 'http://box.ggwp.cn:52490/get_random_image_url';
-  String _platformVersion = 'Unknown';
-  String __heightWidth = "Unknown";
-  double _initialPosition = 0.0 ; // 初始触摸点位置
-  double _lastPosition =  0.0 ; // 上一次触摸点位置
-  double _distance = 0.0; // 位置变化的字符串表示
-  final fadeColor = const LinearGradient(
-    colors: [Colors.blue, Colors.transparent],
-    begin: Alignment.topCenter,
-    end: Alignment.bottomCenter,
-  );
+  // 加载与状态管理
+  bool _isLoading = true;
+  String? _errorMessage;
 
+  // 手势滑动检测
+  double _initialPosition = 0.0;
+  double _lastPosition = 0.0;
 
   @override
   void initState() {
     super.initState();
+    _fetchBingWallpapers();
+  }
 
-    _fetchBingImageUrl();
-    initAppState();
-  } ///运行执行_fetchBingImageUrl
-  ///
-
-
-  Future<void> initAppState() async {
-    String platformVersion;
-    String heightWidth;
-    // Platform messages may fail, so we use a try/catch PlatformException.
-    // We also handle the message potentially returning null.
-    try {
-      platformVersion =
-          await WallpaperManager.platformVersion ?? 'Unknown platform version';
-    } on PlatformException {
-      platformVersion = 'Failed to get platform version.';
-    }
-
-    try {
-      int height = await WallpaperManager.getDesiredMinimumHeight();
-      int width = await WallpaperManager.getDesiredMinimumWidth();
-      heightWidth =
-          "Width = $width Height = $height";
-    } on PlatformException {
-      platformVersion = 'Failed to get platform version.';
-      heightWidth = "Failed to get Height and Width";
-    }
-
-    // If the widget was removed from the tree while the asynchronous platform
-    // message was in flight, we want to discard the reply rather than calling
-    // setState to update our non-existent appearance.
-    if (!mounted) return;
-
+  /// 直接从微软 Bing 官方拉取每日壁纸（免自建服务器）
+  Future<void> _fetchBingWallpapers() async {
     setState(() {
-      __heightWidth = heightWidth;
-      _platformVersion = platformVersion;
+      _isLoading = true;
+      _errorMessage = null;
     });
-  }///壁纸设置初始化
 
-
-  Future<void> _fetchBingImageUrl() async {
     try {
-      final response = await http.get(Uri.parse(_bingApi));
-      if (response.statusCode == 200) {
-        Map<String, dynamic> jsonData = jsonDecode(response.body);
-        setState(() {
-          _imageUrl = jsonData['url'];
-          copyRight = jsonData['copyright'];
+      final list = await BingWallpaperService.fetchAllRecentWallpapers();
+      if (!mounted) return;
+      setState(() {
+        _wallpapers = list;
+        _currentIndex = 0;
+        _isLoading = false;
+      });
+    } catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _errorMessage = e.toString().replaceAll('Exception: ', '');
+        _isLoading = false;
+      });
+      _showToast('壁纸加载失败: $_errorMessage');
+    }
+  }
 
-        });
+  /// 获取当前显示的壁纸对象
+  BingWallpaperItem? get _currentWallpaper {
+    if (_wallpapers.isEmpty || _currentIndex >= _wallpapers.length) {
+      return null;
+    }
+    return _wallpapers[_currentIndex];
+  }
+
+  /// 切换到上一张壁纸
+  void _prevWallpaper() {
+    if (_wallpapers.isEmpty) return;
+    setState(() {
+      if (_currentIndex > 0) {
+        _currentIndex--;
       } else {
+        _currentIndex = _wallpapers.length - 1; // 循环切换
+      }
+    });
+  }
 
-        throw Exception('Failed to load data');
+  /// 切换到下一张壁纸
+  void _nextWallpaper() {
+    if (_wallpapers.isEmpty) return;
+    setState(() {
+      if (_currentIndex < _wallpapers.length - 1) {
+        _currentIndex++;
+      } else {
+        _currentIndex = 0; // 循环切换
+      }
+    });
+  }
+
+  /// 随机切换一张壁纸
+  void _randomWallpaper() {
+    if (_wallpapers.length <= 1) {
+      _fetchBingWallpapers();
+      return;
+    }
+    final nextIndex = (_currentIndex + 1) % _wallpapers.length;
+    setState(() {
+      _currentIndex = nextIndex;
+    });
+  }
+
+  /// 统一轻提示 SnackBar
+  void _showToast(String message) {
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).hideCurrentSnackBar();
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(
+          message,
+          textAlign: TextAlign.center,
+          style: const TextStyle(fontSize: 15.0, color: Colors.white),
+        ),
+        backgroundColor: const Color(0xD9000000),
+        behavior: SnackBarBehavior.floating,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+        margin: const EdgeInsets.symmetric(horizontal: 48, vertical: 32),
+        duration: const Duration(seconds: 2),
+      ),
+    );
+  }
+
+  /// 保存图片到本地相册
+  Future<void> _downloadImage() async {
+    final wallpaper = _currentWallpaper;
+    if (wallpaper == null) {
+      _showToast('暂无壁纸可保存');
+      return;
+    }
+
+    try {
+      _showToast('正在下载高清壁纸...');
+      // 优先保存 4K 超清原图（uhdUrl），若无则保存默认高清竖屏图
+      final saveUrl = wallpaper.uhdUrl.isNotEmpty ? wallpaper.uhdUrl : wallpaper.imageUrl;
+      final file = await DefaultCacheManager().getSingleFile(saveUrl);
+
+      // 请求相册访问权限并保存到相册
+      final hasAccess = await Gal.hasAccess();
+      if (!hasAccess) {
+        final request = await Gal.requestAccess();
+        if (!request) {
+          _showToast('未获得相册权限，无法保存');
+          return;
+        }
+      }
+
+      await Gal.putImage(file.path, album: 'DailyWallpaper');
+      _showToast('保存成功，已存入相册');
+    } catch (e) {
+      _showToast('保存出错: $e');
+    }
+  }
+
+  /// 设置壁纸通用方法
+  Future<void> _setWallpaper(int location, String targetName) async {
+    final wallpaper = _currentWallpaper;
+    if (wallpaper == null) {
+      _showToast('暂无壁纸可设置');
+      return;
+    }
+
+    _showToast('正在下载并设置$targetName...');
+    try {
+      // 使用竖屏版或高清原图缓存
+      final file = await DefaultCacheManager().getSingleFile(wallpaper.imageUrl);
+      final bool result = await WallpaperManager.setWallpaperFromFile(file.path, location);
+      if (result) {
+        _showToast('$targetName设置成功！');
+      } else {
+        _showToast('$targetName设置失败');
       }
     } catch (e) {
-      // 错误处理，例如显示错误消息
+      _showToast('设置壁纸异常: $e');
     }
-  } ///传递图片地址给_imageUrl
+  }
 
-
-
-  // Future<void> _fetchBingImageUrl() async {
-  //   try {
-  //     final String imageUrl = await fetchBingImageUrl();
-  //     setState(() {
-  //
-  //       _imageUrl = imageUrl;
-  //     });
-  //   } catch (e) {
-  //     // 错误处理，例如显示错误消息
-  //     // print(e);
-  //   }
-  // } ///传递图片地址给_imageUrl
-
-  // Future<String> fetchBingImageUrl() async {
-  //   String imageUrl = ''; // 声明imageUrl变量
-  //   _bingApi += '?random=${DateTime.now().microsecondsSinceEpoch}';
-  //   print(_bingApi);
-  //   final client = HttpClient();
-  //   var uri = Uri.parse(_bingApi);
-  //   var request = await client.getUrl(uri);
-  //   request.followRedirects = false;
-  //
-  //   var response = await request.close();
-  //   while (response.isRedirect) {
-  //     response.drain();
-  //     final location = response.headers.value(HttpHeaders.locationHeader);
-  //     if (location != null) {
-  //       uri = uri.resolve(location);
-  //       request = await client.getUrl(uri);
-  //       // Set the body or headers as desired.
-  //       request.followRedirects = false;
-  //       response = await request.close();
-  //       imageUrl = uri.toString();
-  //     }
-  //   }
-  //   return imageUrl;
-  // } ///获取302跳转RUL
-
-
-
-  void _downloadImage() async {
-    var status = await Permission.mediaLibrary.request();
-    if (status.isGranted) {
-      GallerySaver.saveImage(_imageUrl, albumName: 'Media').then((success) {
-        setState(() {
-          ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-            backgroundColor: Colors.transparent,
-            margin: EdgeInsets.only(bottom: 380.0),
-            behavior: SnackBarBehavior.floating,
-            content: Text(
-              '保存成功',
-              textAlign: TextAlign.center,
-              style: TextStyle(fontSize: 20.0),
-            ),
-          ));
-        });
-
-      });
-    }
-    else {}
-  } ///保存图片
-
-
-  Future<void> setWallpaperHome() async {
-    try {
-      String url = _imageUrl;
-      int location = WallpaperManager
-          .HOME_SCREEN; // or location = WallpaperManager.LOCK_SCREEN;
-      var file = await DefaultCacheManager().getSingleFile(url);
-      // final bool result =
-      await WallpaperManager.setWallpaperFromFile(file.path, location);
-        setState(() {
-          ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-            backgroundColor: Colors.transparent,
-            margin: EdgeInsets.only(bottom: 380.0),
-            behavior: SnackBarBehavior.floating,
-            content: Text(
-              '设置成功',
-              textAlign: TextAlign.center,
-              style: TextStyle(fontSize: 20.0),
-            ),
-          ));
-        });
-
-    }
-    catch(e){
-      // ignored, really.
-    }
-  }///设置HOME
-
-  Future<void> setWallpaperLock() async {
-    try {
-      String url = _imageUrl;
-      int location = WallpaperManager
-          .LOCK_SCREEN; // or location = WallpaperManager.LOCK_SCREEN;
-      var file = await DefaultCacheManager().getSingleFile(url);
-      // final bool result =
-      await WallpaperManager.setWallpaperFromFile(file.path, location);
-
-        setState(() {
-          ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-            backgroundColor: Colors.transparent,
-            margin: EdgeInsets.only(bottom: 380.0),
-            behavior: SnackBarBehavior.floating,
-            content: Text(
-              '设置成功',
-              textAlign: TextAlign.center,
-              style: TextStyle(fontSize: 20.0),
-            ),
-          ));
-        });
-
-    }
-    catch(e){
-      // ignored, really.
-    }
-  }///设置LOCK
-
-
-  Future<void> setWallpaperBoth() async {
-    try {
-      String url = _imageUrl;
-      int location = WallpaperManager
-          .BOTH_SCREEN; // or location = WallpaperManager.LOCK_SCREEN;
-      var file = await DefaultCacheManager().getSingleFile(url);
-      // final bool result =
-      await WallpaperManager.setWallpaperFromFile(file.path, location);
-
-      setState(() {
-        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-          backgroundColor: Colors.transparent,
-          margin: EdgeInsets.only(bottom: 380.0),
-          behavior: SnackBarBehavior.floating,
-          content: Text(
-            '设置成功',
-            textAlign: TextAlign.center,
-            style: TextStyle(fontSize: 20.0),
-          ),
-        ));
-      });
-
-    }
-    catch(e){
-      // ignored, really.
-    }
-  }///设置BOTH
-
-
-
-
-
-  void showPopupMenuButton(Offset position) {
-    showMenu(
+  /// 弹出设置壁纸菜单
+  void _showSetWallpaperMenu(Offset position) {
+    showMenu<String>(
       context: context,
       position: RelativeRect.fromLTRB(
-          position.dx-200,
-          position.dy-140,
-          position.dx,
-          position.dy), // 根据需要调整位置
-      items: <PopupMenuItem<String>>[
-
+        position.dx - 180,
+        position.dy - 160,
+        position.dx,
+        position.dy,
+      ),
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+      color: const Color(0xFF1E1E1E),
+      items: [
         PopupMenuItem<String>(
-            onTap: setWallpaperHome,
-            child:const Row(
-              children: [
-                Icon(Icons.home),
-                Text('桌面')
-              ],
-            )
-        ),
-        PopupMenuItem<String>(
-            onTap: setWallpaperLock,
-            child:const Row(
-              children: [
-                Icon(Icons.lock),
-                Text('锁屏',)
-              ],
-            )
-        ),
-        PopupMenuItem<String>(
-          onTap: setWallpaperBoth,
-          child:const Row(
+          onTap: () => _setWallpaper(WallpaperManager.HOME_SCREEN, '桌面壁纸'),
+          child: const Row(
             children: [
-              Icon(Icons.ad_units_outlined),
-              Text('桌面和锁屏'),
+              Icon(Icons.home, color: Colors.lightBlueAccent, size: 20),
+              SizedBox(width: 12),
+              Text('设为桌面', style: TextStyle(color: Colors.white)),
             ],
-          )
+          ),
         ),
-        // 添加更多选项
+        PopupMenuItem<String>(
+          onTap: () => _setWallpaper(WallpaperManager.LOCK_SCREEN, '锁屏壁纸'),
+          child: const Row(
+            children: [
+              Icon(Icons.lock, color: Colors.orangeAccent, size: 20),
+              SizedBox(width: 12),
+              Text('设为锁屏', style: TextStyle(color: Colors.white)),
+            ],
+          ),
+        ),
+        PopupMenuItem<String>(
+          onTap: () => _setWallpaper(WallpaperManager.BOTH_SCREEN, '桌面与锁屏壁纸'),
+          child: const Row(
+            children: [
+              Icon(Icons.smartphone, color: Colors.greenAccent, size: 20),
+              SizedBox(width: 12),
+              Text('同时设为桌面和锁屏', style: TextStyle(color: Colors.white)),
+            ],
+          ),
+        ),
       ],
     );
   }
 
-
-
-
-
-
-
-///////////////////
-
   @override
   Widget build(BuildContext context) {
+    final wallpaper = _currentWallpaper;
+
     return Scaffold(
-      appBar: AppBar(
-              backgroundColor: Colors.blue[700],
-              title: Text(widget.title,style: const TextStyle(color: Colors.black),),
-      ),///蓝色顶部AppBar，单独的空间
-      // appBar: null,///去掉appBar
       backgroundColor: Colors.black,
+      extendBodyBehindAppBar: true,
+      appBar: AppBar(
+        backgroundColor: Colors.transparent,
+        elevation: 0,
+        title: Text(
+          widget.title,
+          style: const TextStyle(
+            color: Colors.white,
+            fontWeight: FontWeight.bold,
+            shadows: [
+              Shadow(blurRadius: 8, color: Colors.black87),
+            ],
+          ),
+        ),
+        actions: [
+          if (_wallpapers.isNotEmpty)
+            Center(
+              child: Container(
+                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                margin: const EdgeInsets.only(right: 16),
+                decoration: BoxDecoration(
+                  color: const Color(0x66000000),
+                  borderRadius: BorderRadius.circular(12),
+                ),
+                child: Text(
+                  '${_currentIndex + 1} / ${_wallpapers.length}',
+                  style: const TextStyle(color: Colors.white70, fontSize: 13),
+                ),
+              ),
+            ),
+        ],
+      ),
       body: Stack(
         children: <Widget>[
+          // 核心壁纸展示与滑动手势
           Positioned.fill(
-
-            child:
-              GestureDetector(
-
-                onPanDown: (details) {
-                  setState(() {
-                    _initialPosition = details.localPosition.dy;
-                  });
-                },
-                // onPanUpdate 回调，更新当前触摸点的 y 坐标
-                onPanUpdate: (details) {
-                  setState(() {
-                    _lastPosition = details.localPosition.dy;
-                  });
-                },
-                // onPanEnd 回调，计算并打印滑动距离
-                onPanEnd: (details) {
-                  _distance = _initialPosition - _lastPosition;
-                 switch(_distance.sign){
-                   case 1:
-                   case -1:
-                     if (_distance.abs() >= 40)
-                       {
-                         _fetchBingImageUrl();
-                       }
-                 }
-                },
-
-                  child: Container(
-                      color: Colors.transparent,
-                      constraints: const BoxConstraints.expand(),
-                      child:
-                          ImageFade(
-                            // whenever the image changes, it will be loaded, and then faded in:
-                            image: _imageUrl == null ? null : NetworkImage(_imageUrl),
-
-                            // slow-ish fade for loaded images:
-                            duration: const Duration(milliseconds: 400),
-
-                            // if the image is loaded synchronously (ex. from memory), fade in faster:
-                            syncDuration: const Duration(milliseconds: 150),
-
-                            // supports most properties of Image:
-                            alignment: Alignment.center,
-                            fit: BoxFit.cover,
-                            scale: 2,
-                            height: double.infinity,
-                            width: double.infinity,
-
-                            // shown behind everything:
-                            placeholder: Container(
-                              color: const Color(0xFFCFCDCA),
-                              alignment: Alignment.center,
-                              child: const Icon(Icons.photo, color: Colors.white30, size: 128.0),
-                            ),
-
-                            // shows progress while loading an image:
-                            loadingBuilder: (context, progress, chunkEvent) =>
-                                Center(child: CircularProgressIndicator(value: progress)),
-
-                            // displayed when an error occurs:
-                            errorBuilder: (context, error) => Container(
-                              color: const Color(0xFF6F6D6A),
-                              alignment: Alignment.center,
-                              child:
-                              Image.asset('assets/images/bg.png' ,fit: BoxFit.fill,
-                                  height: double.infinity,
-                                  width: double.infinity,),
-                            ),
-                          )
-                          
-                  ),
-
-              ),///图片显示和滑动侦测
-
+            child: GestureDetector(
+              onPanDown: (details) {
+                _initialPosition = details.localPosition.dy;
+              },
+              onPanUpdate: (details) {
+                _lastPosition = details.localPosition.dy;
+              },
+              onPanEnd: (details) {
+                final double distance = _initialPosition - _lastPosition;
+                // 滑动距离超过 40 触发切图
+                if (distance > 40) {
+                  // 上滑：切换到上一张（前一天）
+                  _prevWallpaper();
+                } else if (distance < -40) {
+                  // 下滑：切换到下一张
+                  _nextWallpaper();
+                }
+              },
+              child: Container(
+                color: Colors.black,
+                child: _buildWallpaperContent(wallpaper),
+              ),
+            ),
           ),
-          
+
+          // 底部阴影遮罩（增强文字与图标可读性）
           Positioned(
-            bottom: 20.0,
-            right: 10.0,
+            left: 0,
+            right: 0,
+            bottom: 0,
+            height: 240,
+            child: IgnorePointer(
+              child: Container(
+                decoration: const BoxDecoration(
+                  gradient: LinearGradient(
+                    begin: Alignment.topCenter,
+                    end: Alignment.bottomCenter,
+                    colors: [
+                      Colors.transparent,
+                      Colors.black87,
+                    ],
+                  ),
+                ),
+              ),
+            ),
+          ),
+
+          // 底部壁纸版权与标题信息
+          Positioned(
+            bottom: 24.0,
+            left: 20.0,
+            right: 76.0,
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                if (wallpaper != null && wallpaper.title.isNotEmpty) ...[
+                  Text(
+                    wallpaper.title,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: const TextStyle(
+                      color: Colors.white,
+                      fontSize: 18.0,
+                      fontWeight: FontWeight.w600,
+                      shadows: [Shadow(blurRadius: 4.0, color: Colors.black)],
+                    ),
+                  ),
+                  const SizedBox(height: 6.0),
+                ],
+                Text(
+                  wallpaper?.copyright.isNotEmpty == true
+                      ? wallpaper!.copyright
+                      : (_isLoading ? '壁纸正在加载中...' : '暂无版权说明'),
+                  maxLines: 3,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(
+                    color: Colors.white70,
+                    fontSize: 13.0,
+                    fontWeight: FontWeight.w300,
+                    height: 1.3,
+                    shadows: [Shadow(blurRadius: 4.0, color: Colors.black)],
+                  ),
+                ),
+                const SizedBox(height: 6.0),
+                const Row(
+                  children: [
+                    Icon(Icons.swipe_vertical, color: Colors.white38, size: 16),
+                    SizedBox(width: 6),
+                    Text(
+                      '上下滑动切换壁纸',
+                      style: TextStyle(color: Colors.white38, fontSize: 11),
+                    ),
+                  ],
+                ),
+              ],
+            ),
+          ),
+
+          // 右侧快捷操作按钮（刷新/随机、保存、设为壁纸）
+          Positioned(
+            bottom: 24.0,
+            right: 14.0,
             child: Column(
               mainAxisAlignment: MainAxisAlignment.end,
               children: [
-                FloatingActionButton(
-                  onPressed: _fetchBingImageUrl,
-                  backgroundColor: Colors.blue[700],
-                  mini:true,
-                  child: const Icon(Icons.refresh,color: Colors.white70,)
+                // 刷新/随机按钮
+                FloatingActionButton.small(
+                  heroTag: 'fab_refresh',
+                  onPressed: _isLoading ? null : _randomWallpaper,
+                  backgroundColor: const Color(0x40FFFFFF),
+                  elevation: 0,
+                  tooltip: '切换壁纸',
+                  child: const Icon(Icons.refresh, color: Colors.white),
                 ),
+                const SizedBox(height: 12),
 
-                const SizedBox(
-                  height: 10,
+                // 保存到相册
+                FloatingActionButton.small(
+                  heroTag: 'fab_save',
+                  onPressed: _isLoading ? null : _downloadImage,
+                  backgroundColor: const Color(0x40FFFFFF),
+                  elevation: 0,
+                  tooltip: '保存到相册',
+                  child: const Icon(Icons.save_alt, color: Colors.white),
                 ),
-                FloatingActionButton(
-                  onPressed: _downloadImage,
-                  backgroundColor: Colors.blue[700],
-                  mini:true,
-                  child: const Icon(Icons.save,color: Colors.white70,)
-                ),
+                const SizedBox(height: 12),
 
-                const SizedBox(
-                  height: 10,
-                ),
-                GestureDetector ( onTapDown: (TapDownDetails details) {
-                  showPopupMenuButton(details.globalPosition);
-                },
-
-                   child: FloatingActionButton(
+                // 设为壁纸菜单
+                GestureDetector(
+                  onTapDown: (TapDownDetails details) {
+                    _showSetWallpaperMenu(details.globalPosition);
+                  },
+                  child: const FloatingActionButton.small(
+                    heroTag: 'fab_settings',
                     onPressed: null,
-                    backgroundColor: Colors.blue[700],
-                    mini:true,
-                    child: const Icon(Icons.settings,color: Colors.white70,)
+                    backgroundColor: Color(0xD9448AFF),
+                    elevation: 2,
+                    tooltip: '设为壁纸',
+                    child: Icon(Icons.wallpaper, color: Colors.white),
                   ),
                 ),
               ],
-
             ),
-          ),///3个按钮
-          Positioned(
-              bottom: 10.0,
-              left: 20.0,
-              right: 60.0,
-
-              child: Column(
-                mainAxisAlignment:MainAxisAlignment.end,
-                children: [
-                      Text(copyRight,style: const TextStyle(
-                      color: Colors.white70,
-                      fontSize: 22.0,
-                      fontWeight: FontWeight.w300,
-                      shadows: [
-                        Shadow(
-                          blurRadius: 4.0,
-                          color: Colors.grey,
-                        )
-                      ],
-                    ),),
-                  const SizedBox(height: 5.0,),
-                    const Padding( padding: EdgeInsets.only(left: 20.0),
-                      child: Icon(Icons.keyboard_double_arrow_up_outlined,color: Colors.white24,size: 30,),)
-                ]
-              ),
-          ),///底部的CopyRight
-          // Positioned(
-          //   top:0,left: 0,right: 0,
-          //     child: AppBar(
-          //         backgroundColor: Colors.grey.withOpacity(0.4),
-          //         title: Text(widget.title,style: const TextStyle(color: Colors.white70),),
-          //
-          // )
-
-          //)///AppBar半透明
+          ),
         ],
       ),
-      // This trailing comma makes auto-formatting nicer for build methods.
+    );
+  }
+
+  /// 构建壁纸展示内容（支持加载、错误重试与淡入动画）
+  Widget _buildWallpaperContent(BingWallpaperItem? wallpaper) {
+    if (_isLoading && _wallpapers.isEmpty) {
+      return const Center(
+        child: CircularProgressIndicator(color: Colors.blueAccent),
+      );
+    }
+
+    if (_errorMessage != null && _wallpapers.isEmpty) {
+      return Center(
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 32.0),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const Icon(Icons.cloud_off, size: 64, color: Colors.white38),
+              const SizedBox(height: 16),
+              Text(
+                '加载失败: $_errorMessage',
+                textAlign: TextAlign.center,
+                style: const TextStyle(color: Colors.white70, fontSize: 14),
+              ),
+              const SizedBox(height: 16),
+              ElevatedButton.icon(
+                onPressed: _fetchBingWallpapers,
+                icon: const Icon(Icons.refresh),
+                label: const Text('点击重试'),
+              ),
+            ],
+          ),
+        ),
+      );
+    }
+
+    if (wallpaper == null) {
+      return Image.asset(
+        'assets/images/bg.png',
+        fit: BoxFit.cover,
+        width: double.infinity,
+        height: double.infinity,
+      );
+    }
+
+    return ImageFade(
+      key: ValueKey(wallpaper.imageUrl),
+      image: NetworkImage(wallpaper.imageUrl),
+      duration: const Duration(milliseconds: 350),
+      syncDuration: const Duration(milliseconds: 100),
+      alignment: Alignment.center,
+      fit: BoxFit.cover,
+      height: double.infinity,
+      width: double.infinity,
+      placeholder: Container(
+        color: const Color(0xFF1E1E1E),
+        child: const Center(
+          child: CircularProgressIndicator(
+            strokeWidth: 2,
+            color: Colors.white30,
+          ),
+        ),
+      ),
+      errorBuilder: (context, error) => Image.asset(
+        'assets/images/bg.png',
+        fit: BoxFit.cover,
+        width: double.infinity,
+        height: double.infinity,
+      ),
     );
   }
 }
-
-

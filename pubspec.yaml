@@ -37,13 +37,13 @@ dependencies:
   cupertino_icons: ^1.0.6
 #  flutter_gromore_ads: ^3.0.0
   http: ^0.13.3
-  gallery_saver: ^2.3.2
   permission_handler: ^11.3.1
   flutter_wallpaper_manager: ^0.0.4
   flutter_cache_manager: ^3.3.1
   flutter_native_splash: ^2.4.0
   image_fade: ^0.6.2
   path_provider: ^2.0.9
+  gal: ^2.3.3
 
 dev_dependencies:
   flutter_test:

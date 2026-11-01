@@ -1,16 +1,19 @@
-# dally_wallpaper
+# Daily Wallpaper (每日壁纸)
 
-一个每日更新的壁纸
+A Flutter app that delivers a fresh wallpaper every day.
+
+一个每日更新壁纸的 Flutter 应用。
 
 ## Getting Started
 
-This project is a starting point for a Flutter application.
+Requirements: Flutter SDK (stable) and an Android device or emulator.
 
-A few resources to get you started if this is your first Flutter project:
+Clone the repo, then run `flutter pub get` and `flutter run`.
 
-- [Lab: Write your first Flutter app](https://docs.flutter.dev/get-started/codelab)
-- [Cookbook: Useful Flutter samples](https://docs.flutter.dev/cookbook)
+## Tech
 
-For help getting started with Flutter development, view the
-[online documentation](https://docs.flutter.dev/), which offers tutorials,
-samples, guidance on mobile development, and a full API reference.
+Flutter, Dart, Android.
+
+## Contributing
+
+Issues and pull requests are welcome.
